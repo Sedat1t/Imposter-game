@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Wer ist der Impostor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Manrope:wght@500;700&display=swap">
+<style>
+:root{
+  --bg:#12141c; --panel:#1c1f2b; --fg:#eef0f7; --muted:#9097ad;
+  --crew:#38d39f; --imp:#ff4d5e; --btn:#2b3044; --line:#2e3346;
+  --display:"Archivo Black","Arial Black",Impact,sans-serif;
+  --body:"Manrope",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{min-height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;justify-content:center}
+main{width:100%;max-width:440px;display:flex;flex-direction:column;align-items:center;gap:20px;padding-block:36px;text-align:center}
+h1{font-family:var(--display);font-size:2rem;line-height:1.05;margin:0;text-wrap:balance}
+h1 span{color:var(--imp)}
+.label{font-size:.75rem;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);font-weight:700}
+p{margin:0;color:var(--muted);line-height:1.5;max-width:34ch}
+input{width:100%;padding:14px 16px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--fg);font:500 1rem var(--body)}
+input:focus-visible{outline:3px solid var(--crew);outline-offset:2px}
+#code{text-transform:uppercase;letter-spacing:.3em;text-align:center;font-family:var(--display)}
+.stack{display:flex;flex-direction:column;gap:10px;width:100%}
+.or{color:var(--muted);font-size:.85rem}
+.list{list-style:none;margin:0;padding:0;width:100%;display:flex;flex-direction:column;gap:8px}
+.list li{display:flex;align-items:center;gap:12px;padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;text-align:left}
+.list .nm{flex:1;min-width:0;overflow-wrap:anywhere;font-weight:700}
+.list .tag{font-size:.75rem;color:var(--muted)}
+.list .dot{width:10px;height:10px;border-radius:50%;background:var(--crew);flex:none}
+.list .dot.off{background:var(--line)}
+.roomcode{font-family:var(--display);font-size:2.6rem;letter-spacing:.2em}
+.share{display:flex;gap:8px;width:100%}
+.share input{font-size:.85rem}
+.row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.big{width:min(240px,70vw);aspect-ratio:1;max-width:100%;border-radius:50%;border:none;cursor:pointer;
+  background:radial-gradient(circle at 35% 30%,#3a405a,var(--btn) 60%);color:var(--fg);
+  font-family:var(--display);font-size:1.25rem;line-height:1.2;padding:24px;
+  box-shadow:0 10px 0 #0b0c12,0 18px 40px rgba(0,0,0,.45);transition:transform .08s,box-shadow .08s;user-select:none;-webkit-user-select:none;touch-action:none}
+.big.pressed{transform:translateY(8px);box-shadow:0 2px 0 #0b0c12,0 6px 16px rgba(0,0,0,.4)}
+.big.crew{background:radial-gradient(circle at 35% 30%,#5fe6b8,var(--crew) 65%);color:#06261b}
+.big.imp{background:radial-gradient(circle at 35% 30%,#ff7d89,var(--imp) 65%);color:#2e0409}
+.cta{border:none;border-radius:999px;padding:14px 26px;font:700 1rem var(--body);cursor:pointer;background:var(--fg);color:var(--bg)}
+.cta:disabled{opacity:.4;cursor:not-allowed}
+.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+button:focus-visible{outline:3px solid var(--crew);outline-offset:3px}
+.result{font-family:var(--display);font-size:2.2rem;color:var(--imp);overflow-wrap:anywhere}
+.err{color:var(--imp);font-size:.9rem;min-height:1.2em}
+@media (prefers-reduced-motion:reduce){.big{transition:none}}
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+const app = document.getElementById('app');
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch { return null; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch {} },
+};
+let pid = store.get('imp_pid');
+if (!pid) { pid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2)); store.set('imp_pid', pid); }
+let view = null, es = null, err = '', pending = false;
+let room = (new URLSearchParams(location.search).get('r') || store.get('imp_room') || '').toUpperCase();
+
+const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
+const $ = id => document.getElementById(id);
+
+async function api(action, extra = {}) {
+  err = '';
+  try {
+    const r = await fetch('/api/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pid, room, name: store.get('imp_name') || '', ...extra }) });
+    const out = await r.json();
+    if (!r.ok) { err = out.error || 'Das hat nicht geklappt.'; render(); return null; }
+    return out;
+  } catch { err = 'Keine Verbindung zum Server.'; render(); return null; }
+}
+
+function connect(code) {
+  room = code; store.set('imp_room', code);
+  history.replaceState(null, '', '?r=' + code);
+  if (es) es.close();
+  es = new EventSource(`/api/events?room=${encodeURIComponent(code)}&pid=${encodeURIComponent(pid)}`);
+  es.onmessage = e => {
+    view = JSON.parse(e.data);
+    // Nicht neu zeichnen, solange jemand gerade den Knopf gedrückt hält
+    if (document.querySelector('.big.pressed')) { pending = true; return; }
+    render();
+  };
+  es.onerror = () => {
+    // Raum existiert nicht mehr (z. B. Server neu gestartet)
+    fetch(`/api/exists?room=${encodeURIComponent(code)}`).then(r => { if (r.status === 404) { es.close(); view = null; room = ''; store.set('imp_room',''); history.replaceState(null,'','/'); err = 'Dieser Raum existiert nicht mehr.'; render(); } }).catch(() => {});
+  };
+}
+
+function home() {
+  app.innerHTML = `
+    <span class="label">Partyspiel</span>
+    <h1>Wer ist der <span>Impostor</span>?</h1>
+    <p>Jeder spielt auf seinem eigenen Gerät. Einer erstellt einen Raum, die anderen treten mit dem Code bei.</p>
+    <div class="stack">
+      <label class="label" for="name">Dein Name</label>
+      <input id="name" maxlength="24" autocomplete="nickname" placeholder="z. B. Lena" value="${esc(store.get('imp_name') || '')}">
+    </div>
+    <div class="stack">
+      <input id="code" maxlength="4" placeholder="CODE" value="${esc(room)}" aria-label="Raumcode">
+      <button class="cta" id="join">Raum beitreten</button>
+      <span class="or">oder</span>
+      <button class="cta ghost" id="create">Neuen Raum erstellen</button>
+    </div>
+    <p class="err">${esc(err)}</p>`;
+  const saveName = () => { store.set('imp_name', $('name').value.trim()); };
+  $('name').oninput = saveName;
+  $('create').onclick = async () => { saveName(); const out = await api('create'); if (out) connect(out.code); };
+  $('join').onclick = async () => {
+    saveName(); room = $('code').value.trim().toUpperCase();
+    if (room.length !== 4) { err = 'Der Raumcode hat 4 Buchstaben.'; return home(); }
+    const out = await api('join'); if (out) connect(out.code);
+  };
+  $('code').onkeydown = e => { if (e.key === 'Enter') $('join').click(); };
+}
+
+function listHtml(players) {
+  if (!players.length) return '<ul class="list"><li><span class="nm">Noch niemand da</span></li></ul>';
+  return '<ul class="list">' + players.map(p => `<li><span class="dot ${p.online ? '' : 'off'}"></span><span class="nm">${esc(p.name)}</span>${p.pid === view.host ? '<span class="tag">Host</span>' : ''}${p.pid === pid ? '<span class="tag">du</span>' : ''}</li>`).join('') + '</ul>';
+}
+
+function render() {
+  if (!view) return home();
+  const v = view, link = location.origin + '/?r=' + v.code, e = `<p class="err">${esc(err)}</p>`;
+  if (v.phase === 'lobby') {
+    app.innerHTML = `
+      <span class="label">Runde ${v.round} · Lobby</span>
+      <div class="roomcode">${esc(v.code)}</div>
+      <div class="share"><input id="link" readonly value="${esc(link)}" aria-label="Einladungslink"><button class="cta ghost" id="copy">Kopieren</button></div>
+      <span class="label">${v.players.length} Spieler</span>
+      ${listHtml(v.players)}
+      <div class="row">
+        ${v.joined ? `<button class="cta" id="start" ${v.players.length < v.minPlayers ? 'disabled' : ''}>Runde starten</button>`
+                   : '<button class="cta" id="rejoin">Beitreten</button>'}
+        <button class="cta ghost" id="leave">Verlassen</button>
+      </div>
+      ${v.players.length < v.minPlayers ? `<p>Ab ${v.minPlayers} Spielern geht es los.</p>` : ''}${e}`;
+    $('copy').onclick = () => { navigator.clipboard?.writeText(link).then(() => $('copy').textContent = 'Kopiert', () => $('link').select()); };
+    if ($('start')) $('start').onclick = () => api('start');
+    if ($('rejoin')) $('rejoin').onclick = () => api('join');
+    $('leave').onclick = async () => { await api('leave'); es && es.close(); view = null; room = ''; store.set('imp_room',''); history.replaceState(null,'','/'); render(); };
+    return;
+  }
+  if (v.phase === 'play') {
+    app.innerHTML = `
+      <span class="label">Raum ${esc(v.code)} · Runde ${v.round}</span>
+      <h1>${v.inGame ? 'Deine Rolle' : 'Runde läuft'}</h1>
+      ${v.inGame ? `<p>Halte den Knopf gedrückt, um deine Rolle zu sehen. Lass los, damit niemand mitschaut.</p>
+         <button class="big" id="reveal">Gedrückt halten</button>`
+       : '<p>Du spielst diese Runde nicht mit. Warte auf die nächste Runde.</p>'}
+      ${listHtml(v.players)}
+      ${v.inGame ? '<p>Diskutiert, wer lügt. Wenn ihr abgestimmt habt:</p><button class="cta" id="show">Impostor aufdecken</button>' : ''}${e}`;
+    if (v.inGame) hold($('reveal'), v.isImpostor);
+    if ($('show')) $('show').onclick = () => api('reveal');
+    return;
+  }
+  app.innerHTML = `
+    <span class="label">Raum ${esc(v.code)} · Runde ${v.round}</span>
+    <h1>Der Impostor war</h1>
+    <div class="result">${esc(v.impostorName)}${v.isImpostor ? ' (du)' : ''}</div>
+    ${listHtml(v.players)}
+    <button class="cta" id="again">Neue Runde</button>${e}`;
+  $('again').onclick = () => api('again');
+}
+
+function hold(b, isImp) {
+  const show = e => { e.preventDefault(); b.classList.add('pressed', isImp ? 'imp' : 'crew'); b.textContent = isImp ? 'Du bist der Impostor' : 'Kein Impostor'; };
+  const hide = () => {
+    b.classList.remove('pressed', 'imp', 'crew'); b.textContent = 'Gedrückt halten';
+    if (pending) { pending = false; render(); }
+  };
+  b.addEventListener('pointerdown', show);
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(t => b.addEventListener(t, hide));
+  b.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') show(e); });
+  b.addEventListener('keyup', hide);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+// Beim Öffnen eines Einladungslinks: Name nötig, dann automatisch beitreten
+(async () => {
+  if (room && store.get('imp_name')) { const out = await api('join'); if (out) return connect(out.code); room = ''; }
+  render();
+})();
+</script>
+</body>
+</html>
